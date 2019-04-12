@@ -89,6 +89,12 @@
     <dimen name="top_bar_height">40dp</dimen>
     <item name="top_bar_world_y" format="float" type="dimen">0.20</item>
 
+    <!-- Autocompletion Widget -->
+    <dimen name="autocompletion_widget_default_width">40dp</dimen>
+    <dimen name="autocompletion_widget_line_height">40dp</dimen>
+    <dimen name="autocompletion_widget_extended_height">160dp</dimen>
+    <dimen name="autocompletion_widget_margin">35dp</dimen>
+
     <!-- Tray -->
     <item name="tray_world_y" format="float" type="dimen">0.1</item>
     <item name="tray_world_z" format="float" type="dimen">-2.5</item>

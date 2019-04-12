@@ -28,8 +28,14 @@ import org.mozilla.vrbrowser.input.CustomKeyboard;
 import org.mozilla.vrbrowser.telemetry.TelemetryWrapper;
 import org.mozilla.vrbrowser.ui.views.CustomKeyboardView;
 import org.mozilla.vrbrowser.ui.widgets.dialogs.VoiceSearchWidget;
+import org.mozilla.vrbrowser.ui.widgets.keyboards.EnglishKeyboard;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 
 public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKeyboardActionListener,
@@ -43,7 +49,8 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
     private CustomKeyboardView mKeyboardView;
     private CustomKeyboardView mKeyboardNumericView;
     private CustomKeyboardView mPopupKeyboardview;
-    private CustomKeyboard mKeyboardQuerty;
+    private ArrayList<KeyboardInterface> mKeyboards;
+    private KeyboardInterface mCurrentKeyboard;
     private CustomKeyboard mKeyboardSymbols;
     private CustomKeyboard mKeyboardNumeric;
     private Drawable mShiftOnIcon;
@@ -54,6 +61,7 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
     private InputConnection mInputConnection;
     private EditorInfo mEditorInfo = new EditorInfo();
     private VoiceSearchWidget mVoiceSearchWidget;
+    private AutoCompletionWidget mAutoCompletionWidget;
 
     private int mKeyWidth;
     private int mKeyboardPopupTopMargin;
@@ -63,6 +71,12 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
     private boolean mIsCapsLock;
     private ImageView mPopupKeyboardLayer;
     private boolean mIsInVoiceInput = false;
+
+    public interface KeyboardInterface {
+        @NonNull CustomKeyboard getAlphabeticKeyboard();
+        @Nullable Collection<String> getCandidates(String text);
+        int geName();
+    }
 
     public KeyboardWidget(Context aContext) {
         super(aContext);
@@ -90,12 +104,15 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
         mPopupKeyboardview = findViewById(R.id.popupKeyboard);
         mPopupKeyboardLayer = findViewById(R.id.popupKeyboardLayer);
 
-        mKeyboardQuerty = new CustomKeyboard(aContext.getApplicationContext(), R.xml.keyboard_qwerty);
+        mKeyboards = new ArrayList<>();
+        mKeyboards.add(new EnglishKeyboard(aContext));
+        mCurrentKeyboard = mKeyboards.get(0);
+
         mKeyboardSymbols = new CustomKeyboard(aContext.getApplicationContext(), R.xml.keyboard_symbols);
         mKeyboardNumeric = new CustomKeyboard(aContext.getApplicationContext(), R.xml.keyboard_numeric);
 
         mKeyboardView.setPreviewEnabled(false);
-        mKeyboardView.setKeyboard(mKeyboardQuerty);
+        mKeyboardView.setKeyboard(mCurrentKeyboard.getAlphabeticKeyboard());
         mPopupKeyboardview.setPreviewEnabled(false);
         mPopupKeyboardview.setKeyBackground(getContext().getDrawable(R.drawable.keyboard_popupkey_background));
         mPopupKeyboardview.setKeyCapStartBackground(getContext().getDrawable(R.drawable.keyboard_popupkey_capstart_background));
@@ -141,7 +158,6 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
             mPopupKeyboardLayer.setVisibility(View.GONE);
         });
 
-        mKeyboardView.setKeyboard(mKeyboardQuerty);
         mKeyboardView.setVisibility(View.VISIBLE);
         mKeyboardNumericView.setKeyboard(mKeyboardNumeric);
         mPopupKeyboardview.setVisibility(View.GONE);
@@ -154,7 +170,11 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
         mVoiceSearchWidget.setDelegate(this); // VoiceSearchDelegate
         mVoiceSearchWidget.setDelegate(() -> exitVoiceInputMode()); // DismissDelegate
 
+        mAutoCompletionWidget = createChild(AutoCompletionWidget.class, true);
+        mAutoCompletionWidget.getPlacement().worldWidth = mWidgetPlacement.worldWidth * (float) mAutoCompletionWidget.getPlacement().width / (float)mWidgetPlacement.width;
+
         SessionStore.get().addTextInputListener(this);
+        updateCandidates();
     }
 
     @Override
@@ -195,7 +215,7 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
         if ((mEditorInfo.inputType & EditorInfo.TYPE_CLASS_NUMBER) == EditorInfo.TYPE_CLASS_NUMBER)
             mKeyboardView.setKeyboard(mKeyboardSymbols);
         else
-            mKeyboardView.setKeyboard(mKeyboardQuerty);
+            mKeyboardView.setKeyboard(mCurrentKeyboard.getAlphabeticKeyboard());
     }
 
     public void updateFocusedView(View aFocusedView) {
@@ -219,6 +239,8 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
             getPlacement().visible = showKeyboard;
             mWidgetManager.updateWidget(this);
         }
+
+        updateCandidates();
     }
 
     public void dismiss() {
@@ -472,7 +494,8 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
 
     private void handleModeChange() {
         Keyboard current = mKeyboardView.getKeyboard();
-        mKeyboardView.setKeyboard(current == mKeyboardQuerty ? mKeyboardSymbols : mKeyboardQuerty);
+        Keyboard alphabetic = mCurrentKeyboard.getAlphabeticKeyboard();
+        mKeyboardView.setKeyboard(current == alphabetic ? mKeyboardSymbols : alphabetic);
     }
 
     private void handleKey(int primaryCode, int[] keyCodes) {
@@ -531,6 +554,25 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
         } else {
             aRunnable.run();
         }
+    }
+
+    private void updateCandidates() {
+        if (mInputConnection == null) {
+            mAutoCompletionWidget.hide(UIWidget.KEEP_WIDGET);
+            return;
+        }
+
+        String fullText = mInputConnection.getExtractedText(new ExtractedTextRequest(),0).text.toString();
+        String beforeText = mInputConnection.getTextBeforeCursor(fullText.length(),0).toString();
+
+        Iterable<String> candidates = mCurrentKeyboard.getCandidates(beforeText);
+        if (candidates == null || !candidates.iterator().hasNext()) {
+            mAutoCompletionWidget.hide(UIWidget.KEEP_WIDGET);
+            return;
+        }
+
+        mAutoCompletionWidget.setItems(candidates);
+        mAutoCompletionWidget.show(false);
     }
 
     // GeckoSession.TextInputDelegate

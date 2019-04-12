@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/keyboard_background"
+    android:gravity="center_horizontal"
+    android:padding="0dp"
+    android:orientation="vertical">
+    
+    <LinearLayout
+        android:id="@+id/autoCompletionFirstLine"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/autocompletion_widget_line_height"
+        android:paddingStart="20dp"
+        android:paddingRight="20dp"
+        android:layout_gravity="center_vertical"
+        android:orientation="horizontal">
+    </LinearLayout>
+    <View
+        android:id="@+id/autoCompletionSeparator"
+        android:layout_width="match_parent"
+        android:layout_height="0.5dp"
+        android:background="@color/iron"
+        android:visibility="gone"/>
+
+    <ScrollView
+        android:id="@+id/autoCompletionScroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="100"
+        android:visibility="gone">
+
+    </ScrollView>
+</LinearLayout>
