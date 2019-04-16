@@ -5,6 +5,7 @@
 
 package org.mozilla.vrbrowser.ui.widgets;
 
+import android.app.Activity;
 import android.content.Context;
 import android.graphics.drawable.Drawable;
 import android.inputmethodservice.Keyboard;
@@ -19,6 +20,7 @@ import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
 import android.widget.ImageButton;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 
 import org.mozilla.geckoview.GeckoSession;
@@ -26,19 +28,20 @@ import org.mozilla.vrbrowser.R;
 import org.mozilla.vrbrowser.browser.SessionStore;
 import org.mozilla.vrbrowser.input.CustomKeyboard;
 import org.mozilla.vrbrowser.telemetry.TelemetryWrapper;
+import org.mozilla.vrbrowser.ui.views.AutoCompletionView;
 import org.mozilla.vrbrowser.ui.views.CustomKeyboardView;
 import org.mozilla.vrbrowser.ui.widgets.dialogs.VoiceSearchWidget;
+import org.mozilla.vrbrowser.ui.widgets.keyboards.ChineseKeyboard;
 import org.mozilla.vrbrowser.ui.widgets.keyboards.EnglishKeyboard;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 
-public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKeyboardActionListener,
+public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKeyboardActionListener, AutoCompletionView.Delegate,
         GeckoSession.TextInputDelegate, WidgetManagerDelegate.FocusChangeListener, VoiceSearchWidget.VoiceSearchDelegate {
 
     private static final String LOGTAG = "VRB";
@@ -61,7 +64,8 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
     private InputConnection mInputConnection;
     private EditorInfo mEditorInfo = new EditorInfo();
     private VoiceSearchWidget mVoiceSearchWidget;
-    private AutoCompletionWidget mAutoCompletionWidget;
+    private LinearLayout mKeyboardContainer;
+    private AutoCompletionView mAutoCompletionView;
 
     private int mKeyWidth;
     private int mKeyboardPopupTopMargin;
@@ -74,7 +78,8 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
 
     public interface KeyboardInterface {
         @NonNull CustomKeyboard getAlphabeticKeyboard();
-        @Nullable Collection<String> getCandidates(String text);
+        default @Nullable Collection<AutoCompletionView.Words> getCandidates(String text) { return null; }
+        default boolean supportsAutoCompletion() { return false; }
         int geName();
     }
 
@@ -103,9 +108,11 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
         mKeyboardNumericView = findViewById(R.id.keyboardNumeric);
         mPopupKeyboardview = findViewById(R.id.popupKeyboard);
         mPopupKeyboardLayer = findViewById(R.id.popupKeyboardLayer);
+        mKeyboardContainer = findViewById(R.id.keyboardContainer);
 
         mKeyboards = new ArrayList<>();
         mKeyboards.add(new EnglishKeyboard(aContext));
+        mKeyboards.add(new ChineseKeyboard(aContext));
         mCurrentKeyboard = mKeyboards.get(0);
 
         mKeyboardSymbols = new CustomKeyboard(aContext.getApplicationContext(), R.xml.keyboard_symbols);
@@ -133,7 +140,7 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
 
         int[] featuredKeys = {
             ' ', Keyboard.KEYCODE_DELETE, Keyboard.KEYCODE_DONE, Keyboard.KEYCODE_CANCEL, Keyboard.KEYCODE_MODE_CHANGE,
-            CustomKeyboard.KEYCODE_VOICE_INPUT, CustomKeyboard.KEYCODE_SYMBOLS_CHANGE
+            CustomKeyboard.KEYCODE_VOICE_INPUT, CustomKeyboard.KEYCODE_SYMBOLS_CHANGE, CustomKeyboard.KEYCODE_LANG_CHANGE
         };
         mKeyboardView.setFeaturedKeyBackground(R.drawable.keyboard_featured_key_background, featuredKeys);
 
@@ -170,8 +177,9 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
         mVoiceSearchWidget.setDelegate(this); // VoiceSearchDelegate
         mVoiceSearchWidget.setDelegate(() -> exitVoiceInputMode()); // DismissDelegate
 
-        mAutoCompletionWidget = createChild(AutoCompletionWidget.class, true);
-        mAutoCompletionWidget.getPlacement().worldWidth = mWidgetPlacement.worldWidth * (float) mAutoCompletionWidget.getPlacement().width / (float)mWidgetPlacement.width;
+        mAutoCompletionView = findViewById(R.id.autoCompletionView);
+        mAutoCompletionView.setExtendedHeight((int)(mWidgetPlacement.height * mWidgetPlacement.density));
+        mAutoCompletionView.setDelegate(this);
 
         SessionStore.get().addTextInputListener(this);
         updateCandidates();
@@ -181,6 +189,7 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
     public void releaseWidget() {
         mWidgetManager.removeFocusChangeListener(this);
         SessionStore.get().removeTextInputListener(this);
+        mAutoCompletionView.setDelegate(null);
         mBrowserWidget = null;
         super.releaseWidget();
     }
@@ -190,6 +199,8 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
         Context context = getContext();
         aPlacement.width = WidgetPlacement.dpDimension(context, R.dimen.keyboard_width);
         aPlacement.height = WidgetPlacement.dpDimension(context, R.dimen.keyboard_height);
+        aPlacement.height += WidgetPlacement.dpDimension(context, R.dimen.autocompletion_widget_line_height);
+        aPlacement.height += WidgetPlacement.dpDimension(context, R.dimen.keyboard_autocompletion_padding);
         aPlacement.parentAnchorX = 0.5f;
         aPlacement.parentAnchorY = 0.0f;
         aPlacement.anchorX = 0.5f;
@@ -202,6 +213,7 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
         aPlacement.visible = false;
         aPlacement.cylinder = true;
     }
+
 
     public void setBrowserWidget(UIWidget aWidget) {
         mBrowserWidget = aWidget;
@@ -366,8 +378,8 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
             case CustomKeyboard.KEYCODE_VOICE_INPUT:
                 handleVoiceInput();
                 break;
-            case CustomKeyboard.KEYCODE_STRING_COM:
-                handleText(".com");
+            case CustomKeyboard.KEYCODE_LANG_CHANGE:
+                handleChangeLanguage();
                 break;
             default:
                 if (!mIsLongPress) {
@@ -473,6 +485,17 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
 
     }
 
+    private void handleChangeLanguage() {
+        int index = mKeyboards.indexOf(mCurrentKeyboard);
+        if (index < 0) {
+            index = 0;
+        }
+        index = (index + 1) % mKeyboards.size();
+        mCurrentKeyboard = mKeyboards.get(index);
+        mKeyboardView.setKeyboard(mCurrentKeyboard.getAlphabeticKeyboard());
+        updateCandidates();
+    }
+
     private void handleDone() {
         final InputConnection connection = mInputConnection;
         final int action = mEditorInfo.imeOptions & EditorInfo.IME_MASK_ACTION;
@@ -509,11 +532,9 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
         }
         final String result = str;
         final InputConnection connection = mInputConnection;
-        postInputCommand(new Runnable() {
-            @Override
-            public void run() {
-                connection.commitText(result, 1);
-            }
+        postInputCommand(() -> {
+            connection.commitText(result, 1);
+            postUICommand(() -> updateCandidates());
         });
     }
 
@@ -556,24 +577,35 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
         }
     }
 
+    private void postUICommand(Runnable aRunnable) {
+        ((Activity)getContext()).runOnUiThread(aRunnable);
+    }
+
     private void updateCandidates() {
+        setAutoCompletionVisible(mCurrentKeyboard.supportsAutoCompletion());
         if (mInputConnection == null) {
-            mAutoCompletionWidget.hide(UIWidget.KEEP_WIDGET);
             return;
         }
 
         String fullText = mInputConnection.getExtractedText(new ExtractedTextRequest(),0).text.toString();
         String beforeText = mInputConnection.getTextBeforeCursor(fullText.length(),0).toString();
 
-        Iterable<String> candidates = mCurrentKeyboard.getCandidates(beforeText);
-        if (candidates == null || !candidates.iterator().hasNext()) {
-            mAutoCompletionWidget.hide(UIWidget.KEEP_WIDGET);
-            return;
-        }
-
-        mAutoCompletionWidget.setItems(candidates);
-        mAutoCompletionWidget.show(false);
+        Iterable<AutoCompletionView.Words> candidates = mCurrentKeyboard.getCandidates(beforeText);
+        mAutoCompletionView.setItems(candidates);
     }
+
+    private void setAutoCompletionVisible(boolean aVisible) {
+        mAutoCompletionView.setVisibility(aVisible ? View.VISIBLE : View.GONE);
+        RelativeLayout.LayoutParams params = (RelativeLayout.LayoutParams) mKeyboardContainer.getLayoutParams();
+        if (aVisible) {
+            params.topMargin = WidgetPlacement.pixelDimension(getContext(), R.dimen.autocompletion_widget_line_height);
+            params.topMargin += WidgetPlacement.pixelDimension(getContext(), R.dimen.keyboard_autocompletion_padding);
+        } else {
+            params.topMargin = 0;
+        }
+        mKeyboardContainer.setLayoutParams(params);
+    }
+
 
     // GeckoSession.TextInputDelegate
 
@@ -663,5 +695,12 @@ public class KeyboardWidget extends UIWidget implements CustomKeyboardView.OnKey
             mWidgetManager.updateWidget(this);
             mIsInVoiceInput = false;
         }
+    }
+
+    // AutoCompletionDelegate
+
+    @Override
+    public void onAutoCompletionItemClick(String aItemName) {
+        handleText(aItemName);
     }
 }

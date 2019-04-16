@@ -4,6 +4,7 @@ import android.content.Context;
 
 import org.mozilla.vrbrowser.R;
 import org.mozilla.vrbrowser.input.CustomKeyboard;
+import org.mozilla.vrbrowser.ui.views.AutoCompletionView;
 import org.mozilla.vrbrowser.ui.widgets.KeyboardWidget;
 
 import java.util.ArrayList;
@@ -32,12 +33,8 @@ public class EnglishKeyboard implements KeyboardWidget.KeyboardInterface {
 
     @Nullable
     @Override
-    public Collection<String> getCandidates(String aText) {
-        String[] values = new String[]{"a", "b", "c", "d", "e", "f", "g"};
-        ArrayList result = new ArrayList();
-        Collections.addAll(result, values);
-        return result;
-        //return null;
+    public Collection<AutoCompletionView.Words> getCandidates(String aText) {
+        return null;
     }
 
     @Override
